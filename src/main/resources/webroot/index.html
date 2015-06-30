@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,minimum-scale=1,user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <style media="screen" type="text/css">
+    body {
+      font: 10px sans-serif;
+    }
+
+    .axis path,
+    .axis line {
+      fill: none;
+      stroke: #000;
+      shape-rendering: crispEdges;
+    }
+
+    .x.axis path {
+      display: none;
+    }
+
+    .line {
+      fill: none;
+      stroke: steelblue;
+      stroke-width: 1.5px;
+    }  </style>
+  <title>CPU Load</title>
+  <script src="http://d3js.org/d3.v3.js"></script>
+  <script src="//cdn.jsdelivr.net/sockjs/0.3.4/sockjs.min.js"></script>
+  <script src="vertxbus.js"></script>
+  <script type="text/javascript">
+    var eb = new vertx.EventBus(window.location + "eventbus");
+    var data = [];
+
+    var margin = {top: 20, right: 20, bottom: 30, left: 50},
+        width = 480 - margin.left - margin.right,
+        height = 320 - margin.top - margin.bottom;
+
+    var xcenter = width / 2;
+
+    var x = d3.time.scale()
+        .range([0, width]);
+
+    var y = d3.scale.linear()
+        .range([height, 0]);
+
+    var xAxis = d3.svg.axis()
+        .scale(x)
+        .orient("bottom")
+        .tickFormat(d3.time.format("%S"));
+
+    var yAxis = d3.svg.axis()
+        .scale(y)
+        .orient("left");
+
+    var line = d3.svg.line()
+        .x(function (d) {
+          return x(d.creatTime);
+        })
+        .y(function (d) {
+          return y(d.cpuTime);
+        });
+
+    // function
+
+    eb.onopen = function () {
+      eb.registerHandler("load", function (msg) {
+        if (data.length === 25) {
+          // when length of data equal 25 then pop data[0]
+          data.shift();
+        }
+        data.push({
+          "creatTime": new Date(msg.creatTime),
+          "cpuTime": msg.cpuTime
+        });
+        render();
+      });
+    };
+
+    function render() {
+
+      d3.select("svg").remove();
+
+      var svg = d3.select("body").append("svg")
+          .attr("width", width + margin.left + margin.right)
+          .attr("height", height + margin.top + margin.bottom + 40)
+          .append("g")
+          .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+      x.domain(d3.extent(data, function (d) {
+        return d.creatTime;
+      }));
+
+      y.domain(d3.extent(data, function (d) {
+        return d.cpuTime;
+      }));
+
+      svg.append("g")
+          .attr("class", "x axis")
+          .attr("transform", "translate(0," + height + ")")
+          .style("text-anchor", "end")
+          .call(xAxis)
+          .append("text")
+          .attr("transform", "rotate(0)")
+          .attr("y", 40)
+          .attr("dx", xcenter)
+          .attr("font-size", "1.3em")
+          .style("text-anchor", "end")
+          .text("time(s)");
+
+      svg.append("g")
+          .attr("class", "y axis")
+          .attr("transform", "translate(" + height + ",-180px)")
+          .style("text-anchor", "end")
+          .call(yAxis)
+          .append("text")
+          .attr("transform", "rotate(-90)")
+          .attr("y", -40)
+          .attr("dy", ".41em")
+          .attr("font-size", "1.3em")
+          .style("text-anchor", "end")
+          .text("CPU%");
+
+      svg.append("path")
+          .datum(data)
+          .attr("class", "line")
+          .attr("d", line);
+    }
+  </script>
+</head>
+<body>
+</body>
+</html>
