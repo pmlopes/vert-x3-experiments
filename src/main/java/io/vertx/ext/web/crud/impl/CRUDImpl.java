@@ -1,12 +1,11 @@
-package io.vertx.demo.impl;
+package io.vertx.ext.web.crud.impl;
 
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpHeaders;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import io.vertx.demo.CRUDHandler;
-import io.vertx.demo.CRUD;
+import io.vertx.ext.web.crud.CRUD;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 
@@ -70,36 +69,6 @@ public abstract class CRUDImpl implements CRUD {
     router.patch("/" + collection + "/:" + collection + "Id").handler(this::append);
 
     return router;
-  }
-
-  @Override
-  public CRUDImpl createHandler(CRUDHandler<JsonObject> handler) {
-    this.create = handler;
-    return this;
-  }
-
-  @Override
-  public CRUDImpl readHandler(CRUDHandler<List<JsonObject>> handler) {
-    this.read = handler;
-    return this;
-  }
-
-  @Override
-  public CRUDImpl updateHandler(CRUDHandler<Void> handler) {
-    this.update = handler;
-    return this;
-  }
-
-  @Override
-  public CRUDImpl deleteHandler(CRUDHandler<Void> handler) {
-    this.delete = handler;
-    return this;
-  }
-
-  @Override
-  public CRUDImpl countHandler(CRUDHandler<Long> handler) {
-    this.count = handler;
-    return this;
   }
 
   private void delete(final RoutingContext ctx) {

@@ -1,7 +1,7 @@
-package io.vertx.demo;
+package io.vertx.ext.web.crud;
 
 import io.vertx.codegen.annotations.VertxGen;
-import io.vertx.demo.impl.MongoCRUDImpl;
+import io.vertx.ext.web.crud.impl.MongoCRUDImpl;
 import io.vertx.ext.mongo.MongoClient;
 
 @VertxGen

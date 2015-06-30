@@ -1,9 +1,10 @@
-package io.vertx.demo.impl;
+package io.vertx.ext.web.crud.impl;
 
 import io.vertx.core.Future;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.mongo.FindOptions;
 import io.vertx.ext.mongo.MongoClient;
+import io.vertx.ext.web.crud.CRUD;
 
 public class MongoCRUDImpl extends CRUDImpl {
 
@@ -28,7 +29,7 @@ public class MongoCRUDImpl extends CRUDImpl {
   }
 
   @Override
-  public CRUDImpl enableCreate(boolean state) {
+  public CRUD enableCreate(boolean state) {
     if (state) {
       create = (filter, res) -> {
         mongo.insert(collection, filter.getJsonObject("value"), res1 -> {
@@ -56,7 +57,7 @@ public class MongoCRUDImpl extends CRUDImpl {
   }
 
   @Override
-  public CRUDImpl enableRead(boolean state) {
+  public CRUD enableRead(boolean state) {
     if (state) {
       read = (filter, res) -> {
         JsonObject sort = filter.getJsonObject("sort");
@@ -90,7 +91,7 @@ public class MongoCRUDImpl extends CRUDImpl {
   }
 
   @Override
-  public CRUDImpl enableUpdate(boolean state) {
+  public CRUD enableUpdate(boolean state) {
     if (state) {
       update = (filter, res) -> mongo.replace(collection, filter.getJsonObject("query"), filter.getJsonObject("value"), res);
     } else {
@@ -100,7 +101,7 @@ public class MongoCRUDImpl extends CRUDImpl {
   }
 
   @Override
-  public CRUDImpl enableDelete(boolean state) {
+  public CRUD enableDelete(boolean state) {
     if (state) {
       delete = (filter, res) -> mongo.removeOne(collection, filter.getJsonObject("query"), res);
     } else {
