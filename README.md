@@ -1,10 +1,4 @@
----
-title: Vert.x3 real time web apps
-date: 2015-08-25
-template: post.html
-author: pmlopes
-draft: true
----
+# Vert.x3 real time web apps
 
 One of the interesting features of Vert.x is the SockJS event bus bridge. This piece of software allows external
 applications to communicate with Vert.x event bus using Websockets and if your browser does not support it then it
