@@ -1,0 +1,16 @@
+{
+  "name": "draw",
+  "private": true,
+  "dependencies": {
+    "vertx3-full": "3.0.0-1"
+  },
+  "scripts": {
+    "start": "vertx run server.js"
+  },
+  "version": "1.0.0",
+  "main": "server.js",
+  "devDependencies": {},
+  "author": "",
+  "license": "ISC",
+  "description": ""
+}
