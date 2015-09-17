@@ -1,3 +1,4 @@
-# My Vert.x3 experiments
+# Vert.x3 API Documentation Testing
 
-This are just some experimental stuff not yet ready for prime time
+This experiment shows how one can easily test API contracts defined in [RAML](http://raml.org/) and implemented in
+ [Vert.x](http://vertx.io).
