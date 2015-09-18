@@ -10,3 +10,12 @@ version: v1
       200:
         body:
           application/json:
+            schema: |
+              { "$schema": "http://json-schema.org/schema",
+                "type": "object",
+                "description": "Hello World Greeting",
+                "properties": {
+                  "greeting":  { "type": "string" }
+                },
+                "required": [ "greeting" ]
+              }

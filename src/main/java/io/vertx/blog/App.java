@@ -18,7 +18,7 @@ public class App extends AbstractVerticle {
     router.get("/hello").handler(rc -> {
       rc.response()
           .putHeader("content-type", "application/json")
-          .end(new JsonObject().encode());
+          .end(new JsonObject().put("greeting", "Hello World!").encode());
     });
 
     vertx.createHttpServer().requestHandler(router::accept).listen(8080);
