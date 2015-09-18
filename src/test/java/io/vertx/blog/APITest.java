@@ -14,8 +14,8 @@ import org.junit.Test;
 
 public class APITest {
 
-  private static final RamlDefinition api = RamlLoaders.fromClasspath(APITest.class)
-      .load("hello.raml")
+  private static final RamlDefinition api = RamlLoaders.fromClasspath()
+      .load("/webroot/api/hello.raml")
       .assumingBaseUri("http://localhost:8080/");
 
   private ResteasyClient client = new ResteasyClientBuilder().build();
