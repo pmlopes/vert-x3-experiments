@@ -1,298 +1,263 @@
 package xyz.jetdrone.blockchain.impl;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import io.vertx.core.eventbus.EventBus;
-import io.vertx.core.eventbus.Message;
+import io.vertx.core.eventbus.MessageConsumer;
+import io.vertx.core.json.Json;
 import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
-import io.vertx.core.logging.Logger;
-import io.vertx.core.logging.LoggerFactory;
 import xyz.jetdrone.blockchain.Block;
 import xyz.jetdrone.blockchain.Blockchain;
 
-import java.nio.charset.Charset;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static xyz.jetdrone.blockchain.impl.Hash.sha256;
+
 public class BlockchainImpl implements Blockchain {
 
-  private final Logger log = LoggerFactory.getLogger(BlockchainImpl.class);
-
-  private static final Charset UTF8 = Charset.forName("UTF8");
-
-  private final Vertx vertx;
   private final EventBus eb;
+  private final String baseAddress;
+  private final List<Block> chain;
+  // mutable state
+  private MessageConsumer messageConsumer;
+  private Handler<Block> blockHandler;
+  private Handler<Void> replaceHandler;
 
-  private final MessageDigest sha256;
-
-  private final List<Block> blockchain = new ArrayList<>();
-  private final int difficulty;
-
-  public BlockchainImpl(Vertx vertx) {
-    try {
-      sha256 = MessageDigest.getInstance("SHA-256");
-    } catch (NoSuchAlgorithmException e) {
-      throw new RuntimeException(e);
-    }
-
-    this.vertx = vertx;
-    eb = vertx.eventBus();
-    blockchain.add(Block.GENESIS);
-    difficulty = 4;
+  public BlockchainImpl(EventBus eb, String baseAddress) {
+    this.eb = eb;
+    this.baseAddress = baseAddress;
+    // the internal state
+    chain = new ArrayList<>();
+    // insert the genesis block
+    chain.add(new Block()
+      .setIndex(0)
+      .setNonce(1)
+      .setPreviousHash("")
+      .setData("<genesis>"));
   }
 
   @Override
-  public Blockchain start() {
-    // start up (sync with existing nodes)
-    eb.<JsonArray>send(QUERY_ALL, new JsonObject(), sync -> {
-      // ignore initial sync errors
-      if (sync.succeeded()) {
-        handle(sync.result());
+  public final Blockchain start(Handler<AsyncResult<Void>> handler) {
+    eb.send(baseAddress, null, onSend -> {
+      if (onSend.succeeded()) {
+        consensus(((JsonArray) onSend.result().body())
+          .stream()
+          .map(json -> new Block((JsonObject) json))
+          .collect(Collectors.toList()));
       }
+    });
 
-      // start listening for updates
-      eb.consumer(RESPONSE_BLOCKCHAIN, this::handle);
-      // reply to queries
-      eb.consumer(QUERY_LATEST, message -> {
-        log.trace("⬇  Peer requested for latest block.");
-
-        log.debug("⬆  Sending peer latest block");
-        message.reply(new JsonArray().add(getLatestBlock().toJson()));
-      });
-
-      eb.consumer(QUERY_ALL, message -> {
-        log.trace("⬇  Peer requested for blockchain.");
-
-        log.debug("⬆  Sending peer entire blockchain");
-
-        final JsonArray json = new JsonArray();
-        for (Block b : blockchain) {
-          json.add(b.toJson());
+    // start listening for events
+    messageConsumer = eb.consumer(baseAddress, message -> {
+      if (message.body() != null) {
+        // if there is a body it is a mine event
+        consensus(Collections.singletonList(new Block((JsonObject) message.body())));
+      } else {
+        // when there is no message it's a chain request
+        JsonArray json = new JsonArray();
+        for (Block block : chain) {
+          json.add(block.toJson());
         }
 
         message.reply(json);
-      });
+      }
     });
 
+    if (handler != null) {
+      handler.handle(Future.succeededFuture());
+    }
+
     return this;
   }
 
   @Override
-  public Blockchain stop() {
+  public Blockchain stop(Handler<AsyncResult<Void>> handler) {
+    if (messageConsumer != null) {
+      messageConsumer.unregister(handler);
+      messageConsumer = null;
+    }
+
     return this;
   }
 
-  private void handle(Message<JsonArray> message) {
-    final List<Block> receivedBlocks = message.body()
-      .stream()
-      .map(json -> new Block((JsonObject) json))
-      .collect(Collectors.toList());
-
-    // sort
-    receivedBlocks.sort((b1, b2) -> (b1.getIndex() - b2.getIndex()));
-
-    final Block latestBlockReceived = receivedBlocks.get(receivedBlocks.size() - 1);
-    final Block latestBlockHeld = getLatestBlock();
-
-    log.trace("⬇  Peer sent over " + (receivedBlocks.size() == 1 ? "single block" : "blockchain") + ".");
-
-    if (latestBlockReceived.getIndex() <= latestBlockHeld.getIndex()) {
-      log.debug("💤  Received latest block is not longer than current blockchain. Do nothing");
-      return;
-    }
-
-    log.info("🐢  Blockchain possibly behind. Received latest block is " + latestBlockReceived.getIndex() + ". Current latest block is " + latestBlockHeld.getIndex() + ".");
-
-    if (latestBlockHeld.getHash().equals(latestBlockReceived.getPreviousHash())) {
-      log.info("👍  Previous hash received is equal to current hash. Append received block to blockchain.");
-      addBlockFromPeer(latestBlockReceived);
-
-      log.debug("⬆  Sending peer latest block");
-      eb.publish(RESPONSE_BLOCKCHAIN, new JsonArray().add(getLatestBlock().toJson()));
-    } else if (receivedBlocks.size() == 1) {
-      log.info("🤔  Received previous hash different from current hash. Get entire blockchain from peer.");
-
-      log.debug("⬆  Asking peer for entire blockchain");
-      eb.publish(QUERY_ALL, new JsonObject());
-    } else {
-      log.info("⛓  Peer blockchain is longer than current blockchain.");
-      replaceChain(receivedBlocks);
-
-      log.debug("⬆  Sending peer latest block");
-      eb.publish(RESPONSE_BLOCKCHAIN, new JsonArray().add(getLatestBlock().toJson()));
-    }
+  @Override
+  public final int size() {
+    return chain.size();
   }
 
   @Override
-  public Block get(int index) {
-    return blockchain.get(index);
+  public final Block get(int index) {
+    if (index < 0 || index >= chain.size()) {
+      return null;
+    }
+
+    return chain.get(index);
   }
 
   @Override
-  public int size() {
-    return blockchain.size();
+  public final Block last() {
+    return chain.get(chain.size() - 1);
   }
 
   @Override
-  public Block getLatestBlock() {
-    return blockchain.get(blockchain.size() - 1);
+  public final Blockchain blockHandler(Handler<Block> handler) {
+    this.blockHandler = handler;
+    return this;
   }
 
   @Override
-  public void mine(String seed) {
-    final Block newBlock = generateNextBlock(seed);
-    if (addBlock(newBlock)) {
-      log.info("🎉  Congratulations! A new block was mined. 💎");
-    }
-    // announce the new block
-    eb.publish(RESPONSE_BLOCKCHAIN, new JsonArray().add(getLatestBlock().toJson()));
+  public final Blockchain replaceHandler(Handler<Void> handler) {
+    this.replaceHandler = handler;
+    return this;
   }
 
   @Override
-  public void replaceChain(List<Block> newBlocks) {
-    if (!isValidChain(newBlocks)) {
-      log.info("❌ Replacement chain is not valid. Won't replace existing blockchain.");
-      return;
+  public final Blockchain add(String data, Handler<AsyncResult<Block>> handler) {
+    // we run the proof of work algorithm to get the next proof...
+    Block lastBlock = last();
+    int lastProof = lastBlock.getNonce();
+    int proof = proofOfWork(lastProof);
+
+    // forge the new Block by adding it to the chain
+    final Block block = new Block()
+      .setIndex(chain.size())
+      .setTimestamp(System.currentTimeMillis())
+      .setData(data)
+      .setNonce(proof)
+      .setPreviousHash(hash(lastBlock));
+
+    chain.add(block);
+    // notify the event handler
+    if (blockHandler != null) {
+      blockHandler.handle(block);
     }
+    // announce to peers the new mined block
+    eb.publish(baseAddress, block.toJson());
 
-    if (newBlocks.size() <= blockchain.size()) {
-      log.info("❌  Replacement chain is shorter than original. Won't replace existing blockchain.");
-      return;
-    }
-
-    log.info("✅  Received blockchain is valid. Replacing current blockchain with received blockchain");
-    blockchain.clear();
-
-    blockchain.addAll(newBlocks);
+    handler.handle(Future.succeededFuture(block));
+    return this;
   }
 
-  private boolean isValidChain(List<Block> blockchainToValidate) {
-    if (!Block.GENESIS.equals(blockchainToValidate.get(0))) {
-      return false;
+  /**
+   * Creates a SHA-256 hash of a Block
+   *
+   * @param block the block to encode
+   * @return sha256 hex value
+   */
+  private static String hash(Block block) {
+    return sha256(block.getIndex() + ":" + block.getPreviousHash() + ":" + block.getTimestamp() + ":" + block.getData() + ":" + block.getNonce());
+  }
+
+  /**
+   * Simple Proof of Work Algorithm:
+   * - Find a number p' such that hash(pp') contains leading 4 zeroes, where p is the previous p'
+   * - p is the previous proof, and p' is the new proof
+   *
+   * @param lastProof the previous proof
+   * @return the current proof
+   */
+  public int proofOfWork(int lastProof) {
+    int proof = 0;
+    while (!validProof(lastProof, proof)) {
+      proof++;
     }
 
-    final List<Block> tempBlocks = new ArrayList<>();
-    tempBlocks.add(blockchainToValidate.get(0));
+    return proof;
+  }
 
-    for (int i = 1; i < blockchainToValidate.size(); i++) {
-      if (isValidNewBlock(blockchainToValidate.get(i), tempBlocks.get(i - 1))) {
-        tempBlocks.add(blockchainToValidate.get(i));
-      } else {
+  /**
+   * Validates the Proof. (Implementation detail)
+   *
+   * @param lastProof Previous proof
+   * @param proof     Current proof
+   * @return true if correct, false if not
+   */
+  private static boolean validProof(int lastProof, int proof) {
+    String guess = Integer.toString(lastProof) + Integer.toString(proof);
+    String guessHash = sha256(guess);
+    // hardcoded difficulty of 4
+    return guessHash.substring(0, 4).equals("0000");
+  }
+
+  /**
+   * Determine if a given blockchain is valid.
+   *
+   * @param chain A blockchain
+   * @return True if valid, False if not
+   */
+  public final boolean validChain(List<Block> chain) {
+    Block lastBlock = chain.get(0);
+    int currentIndex = 1;
+
+    while (currentIndex < chain.size()) {
+      Block block = chain.get(currentIndex);
+      // check that the hash of the block is correct
+      if (!block.getPreviousHash().equals(hash(lastBlock))) {
         return false;
       }
+      // check that the Proof of Work is correct
+      if (!validProof(lastBlock.getNonce(), block.getNonce())) {
+        return false;
+      }
+
+      lastBlock = block;
+      currentIndex++;
     }
+
     return true;
   }
 
-  @Override
-  public boolean addBlock(Block newBlock) {
-    if (isValidNewBlock(newBlock, getLatestBlock())) {
-      blockchain.add(newBlock);
-      return true;
-    }
-    return false;
-  }
+  /**
+   * This is our consensus algorithm, it resolves conflicts
+   * by replacing our chain with the longest one in the network.
+   */
+  public void consensus(List<Block> receivedBlocks) {
+    final Block latestBlockReceived = receivedBlocks.get(receivedBlocks.size() - 1);
+    final Block latestBlockHeld = last();
 
-  @Override
-  public void addBlockFromPeer(Block json) {
-    if (isValidNewBlock(json, getLatestBlock())) {
-      blockchain.add(
-        new Block()
-          .setIndex(json.getIndex())
-          .setPreviousHash(json.getPreviousHash())
-          .setTimestamp(json.getTimestamp())
-          .setData(json.getData())
-          .setHash(json.getHash())
-          .setNonce(json.getNonce()));
-    }
-  }
-
-  private String calculateHashForBlock(Block block) {
-    return calculateHash(block.getIndex(), block.getPreviousHash(), block.getTimestamp(), block.getData(), block.getNonce());
-  }
-
-  private synchronized String calculateHash(int index, String previousHash, long timestamp, String data, int nonce) {
-    sha256.update((index + previousHash + timestamp + data + nonce).getBytes(UTF8));
-    return bytesToHex(sha256.digest());
-  }
-
-  private boolean isValidNewBlock(Block newBlock, Block previousBlock) {
-    final String blockHash = calculateHashForBlock(newBlock);
-
-    if (previousBlock.getIndex() + 1 != newBlock.getIndex()) {
-      log.info("❌  new block has invalid index");
-      return false;
-    } else if (!previousBlock.getHash().equals(newBlock.getPreviousHash())) {
-      log.info("❌  new block has invalid previous hash");
-      return false;
-    } else if (!blockHash.equals(newBlock.getHash())) {
-      log.info("❌  invalid hash:" + blockHash + " " + newBlock.getHash());
-      return false;
-    } else if (!isValidHashDifficulty(calculateHashForBlock(newBlock))) {
-      log.info("❌  invalid hash does not meet difficulty requirements: " + calculateHashForBlock(newBlock));
-      return false;
-    }
-    return true;
-  }
-
-  @Override
-  public Block generateNextBlock(String blockData) {
-    final Block previousBlock = getLatestBlock();
-    final int nextIndex = previousBlock.getIndex() + 1;
-    final long nextTimestamp = System.currentTimeMillis() / 1000;
-    int nonce = 0;
-    String nextHash = "";
-
-    while (!isValidHashDifficulty(nextHash)) {
-      nonce = nonce + 1;
-      nextHash = calculateHash(nextIndex, previousBlock.getHash(), nextTimestamp, blockData, nonce);
+    if (latestBlockReceived.getIndex() <= latestBlockHeld.getIndex()) {
+      // received latest block is not longer than current store. Do nothing
+      return;
     }
 
-    return new Block()
-      .setIndex(nextIndex)
-      .setPreviousHash(previousBlock.getHash())
-      .setTimestamp(nextTimestamp)
-      .setData(blockData)
-      .setHash(nextHash)
-      .setNonce(nonce);
-  }
-
-  private boolean isValidHashDifficulty(String hash) {
-    int i, b;
-    for (i = 0, b = hash.length(); i < b; i++) {
-      if (hash.charAt(i) != '0') {
-        break;
+    if (hash(latestBlockHeld).equals(latestBlockReceived.getPreviousHash())) {
+      // previous hash received is equal to current hash. Append received block to store.
+      chain.add(latestBlockReceived);
+      // notify the event handler
+      if (blockHandler != null) {
+        blockHandler.handle(latestBlockReceived);
+      }
+    } else if (receivedBlocks.size() == 1) {
+      // received previous hash different from current hash. Get entire store from peer.
+      eb.send(baseAddress, null, onSend -> {
+        if (onSend.succeeded()) {
+          consensus(((JsonArray) onSend.result().body())
+            .stream()
+            .map(json -> new Block((JsonObject) json))
+            .collect(Collectors.toList()));
+        }
+      });
+    } else {
+      // Peer store is longer than current store.
+      if (validChain(receivedBlocks)) {
+        chain.clear();
+        chain.addAll(receivedBlocks);
+        // notify the event handler
+        if (replaceHandler != null) {
+          replaceHandler.handle(null);
+        }
       }
     }
-    return i == difficulty;
-  }
-
-  private final static char[] HEX = "0123456789abcdef".toCharArray();
-
-  private static String bytesToHex(byte[] bytes) {
-    char[] hexChars = new char[bytes.length * 2];
-    for (int j = 0; j < bytes.length; j++) {
-      int v = bytes[j] & 0xFF;
-      hexChars[j * 2] = HEX[v >>> 4];
-      hexChars[j * 2 + 1] = HEX[v & 0x0F];
-    }
-    return new String(hexChars);
   }
 
   @Override
   public String toString() {
-    StringBuilder sb = new StringBuilder();
-    sb.append("[\n");
-    for (Block block : blockchain) {
-      sb.append("  ");
-      sb.append(block.toJson().encode());
-      sb.append("\n");
-    }
-    sb.append("]\n");
-
-    return sb.toString();
+    return Json.encodePrettily(chain);
   }
 }

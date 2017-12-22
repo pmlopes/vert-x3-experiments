@@ -12,13 +12,18 @@
   <name>Blockchain</name>
 
   <properties>
-    <main.verticle>xyz.jetdrone.blockchain.BlockChainVerticle</main.verticle>
+    <main.verticle>xyz.jetdrone.blockchain.WebVerticle</main.verticle>
   </properties>
 
   <dependencies>
     <dependency>
       <groupId>io.vertx</groupId>
       <artifactId>vertx-core</artifactId>
+      <version>3.5.0</version>
+    </dependency>
+    <dependency>
+      <groupId>io.vertx</groupId>
+      <artifactId>vertx-web</artifactId>
       <version>3.5.0</version>
     </dependency>
     <dependency>

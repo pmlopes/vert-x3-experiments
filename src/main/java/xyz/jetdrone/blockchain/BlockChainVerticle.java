@@ -9,7 +9,7 @@ public class BlockChainVerticle extends AbstractVerticle {
   @Override
   public void start() {
     blockchain = Blockchain
-      .create(vertx)
+      .blockchain(vertx, "xyz.jetdrone.blockchain")
       .start();
 
     final Thread shell = new Thread(() -> {
@@ -26,8 +26,16 @@ public class BlockChainVerticle extends AbstractVerticle {
             });
             break;
           case "m":
+            if (cmd.length < 2) {
+              System.out.println("not enough arguments: m payload");
+              break;
+            }
             vertx.runOnContext(v -> {
-              blockchain.mine(cmd[1]);
+              blockchain.add(cmd[1], onAdd -> {
+                if (onAdd.failed()) {
+                  onAdd.cause().printStackTrace();
+                }
+              });
             });
             break;
         }

@@ -2,41 +2,99 @@ package xyz.jetdrone.blockchain;
 
 import io.vertx.codegen.annotations.Fluent;
 import io.vertx.codegen.annotations.VertxGen;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 import xyz.jetdrone.blockchain.impl.BlockchainImpl;
 
-import java.util.List;
-
+/**
+ * Create a Blockchain API that can be used both internally or over the eventbus
+ */
 @VertxGen
 public interface Blockchain {
-
-  String QUERY_LATEST = "xyz.jetdrone.blockchain.query.latest";
-  String QUERY_ALL = "xyz.jetdrone.blockchain.query.all";
-  String RESPONSE_BLOCKCHAIN = "xyz.jetdrone.blockchain.query.get";
-
-  static Blockchain create(Vertx vertx) {
-    return new BlockchainImpl(vertx);
+  /**
+   * Factory method.
+   */
+  static Blockchain blockchain(Vertx vertx, String baseAddress) {
+    return new BlockchainImpl(vertx.eventBus(), baseAddress);
   }
 
+  /**
+   * Start the P2P sync.
+   *
+   * @param handler - Asynchronous result callback handler.
+   * @return fluent self
+   */
   @Fluent
-  Blockchain start();
+  Blockchain start(Handler<AsyncResult<Void>> handler);
 
   @Fluent
-  Blockchain stop();
+  default Blockchain start() {
+    return  start(onStart -> {});
+  }
 
-  Block get(int index);
+  /**
+   * Stop the P2P sync.
+   *
+   * @param handler - Asynchronous result callback handler.
+   * @return fluent self
+   */
+  @Fluent
+  Blockchain stop(Handler<AsyncResult<Void>> handler);
 
+  @Fluent
+  default Blockchain stop() {
+    return stop(onStop -> {});
+  }
+
+  /**
+   * Returns the current size of the blockchain.
+   *
+   * @return size of the chain.
+   */
   int size();
 
-  Block getLatestBlock();
+  /**
+   * Returns the read only Block at a given position.
+   *
+   * @param index the index to lookup.
+   * @return a block or null if index out of bounds.
+   */
+  Block get(int index);
 
-  void mine(String seed);
+  /**
+   * Returns the read only Block at the end of the chain.
+   *
+   * @return a non null block.
+   */
+  Block last();
 
-  void replaceChain(List<Block> newBlocks);
+  /**
+   * Event handler that will be invoked when a new block is added to the chain.
+   *
+   * @param handler - Asynchronous result callback handler.
+   * @return fluent self
+   */
+  @Fluent
+  Blockchain blockHandler(Handler<Block> handler);
 
-  boolean addBlock(Block newBlock);
+  /**
+   * Event handler that will be invoked when the chain is replaced (conflict resolution).
+   *
+   * @param handler - Asynchronous result callback handler.
+   * @return fluent self
+   */
+  @Fluent
+  Blockchain replaceHandler(Handler<Void> handler);
 
-  void addBlockFromPeer(Block json);
-
-  Block generateNextBlock(String blockData);
+  /**
+   * Add a the given date to the chain.
+   * The data will be wrapped in a block and the inserted to the chain.
+   *
+   * @param data the data to store.
+   * @param handler - Asynchronous result callback handler.
+   * @return fluent self
+   */
+  @Fluent
+  Blockchain add(String data, Handler<AsyncResult<Block>> handler);
 }
