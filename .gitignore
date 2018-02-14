@@ -6,3 +6,6 @@ lib_managed
 node_modules
 .vertx
 .vscode
+.classpath
+.project
+.settings
